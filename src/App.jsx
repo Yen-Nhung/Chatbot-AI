@@ -34,23 +34,57 @@ const App = () => {
       body: JSON.stringify({ contents: history }),
     };
 
-    try {
-      // Make the API call to get the bot's response
-      const response = await fetch(
-        import.meta.env.VITE_API_URL,
-        requestOptions
-      );
-      const data = await response.json();
-      if (!response.ok)
-        throw new Error(data.error.message || "Something went wrong");
+    const maxRetries = 3; // Set a maximum number of retries
+    let retries = 0;
 
-      // Clean and update chat history with the bot's response
-      const apiResonseText = data.candidates[0].content.parts[0].text
-        .replace(/\*\*(.*?)\*\*/g, "$1")
-        .trim();
-      updateHistory(apiResonseText);
-    } catch (error) {
-      updateHistory(error.message, true);
+    while (retries < maxRetries) {
+      try {
+        // Make the API call to get the bot's response
+        const response = await fetch(
+          import.meta.env.VITE_API_URL,
+          requestOptions
+        );
+
+        if (response.status === 503) {
+          // If it's a 503 error, wait and retry
+          retries++;
+          console.warn(
+            `503 Service Unavailable. Retrying... Attempt ${retries}`
+          );
+          await new Promise((resolve) => setTimeout(resolve, 1000 * retries)); // Wait longer on subsequent retries
+          continue; // Skip to the next iteration of the loop
+        }
+
+        const data = await response.json();
+        if (!response.ok)
+          throw new Error(data.error.message || "Something went wrong");
+
+        // Clean and update chat history with the bot's response
+        const apiResonseText = data.candidates[0].content.parts[0].text
+          .replace(/\*\*(.*?)\*\*/g, "$1")
+          .trim();
+        updateHistory(apiResonseText);
+        break; // Exit the loop on success
+      } catch (error) {
+        if (
+          retries === maxRetries - 1 ||
+          error.message !== "Something went wrong"
+        ) {
+          // If max retries reached or it's not a generic error, update history with the error
+          updateHistory(error.message, true);
+          break; // Exit the loop after handling the error
+        }
+        retries++;
+        console.warn(`Error fetching response. Retrying... Attempt ${retries}`);
+        await new Promise((resolve) => setTimeout(resolve, 1000 * retries)); // Wait longer on subsequent retries
+      }
+    }
+
+    if (retries === maxRetries) {
+      updateHistory(
+        "Service is currently unavailable. Please try again later.",
+        true
+      );
     }
   };
 
